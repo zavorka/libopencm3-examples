@@ -26,8 +26,6 @@
 #include <libopencm3/stm32/usart.h>
 #include <libopencm3/stm32/gpio.h>
 
-uint8_t channel_array[] = { 1, 1, ADC_CHANNEL_TEMP};
-
 static void adc_setup(void)
 {
 	rcc_periph_clock_enable(RCC_ADC);
@@ -44,7 +42,6 @@ static void adc_setup(void)
 	adc_set_right_aligned(ADC1);
 	adc_enable_temperature_sensor();
 	adc_set_sample_time_on_all_channels(ADC1, ADC_SMPTIME_071DOT5);
-	adc_set_regular_sequence(ADC1, 1, channel_array);
 	adc_set_resolution(ADC1, ADC_RESOLUTION_12BIT);
 	adc_disable_analog_watchdog(ADC1);
 	adc_power_on(ADC1);
@@ -54,7 +51,13 @@ static void adc_setup(void)
 	for (i = 0; i < 800000; i++) {    /* Wait a bit. */
 		__asm__("nop");
 	}
+}
 
+static void led_setup(void)
+{
+	rcc_periph_clock_enable(RCC_GPIOB);
+	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO0);
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_100MHZ, GPIO0);
 }
 
 static void usart_setup(void)
@@ -79,7 +82,7 @@ static void usart_setup(void)
 	usart_enable(USART1);
 }
 
-static void my_usart_print_int(uint32_t usart, int16_t value)
+static void my_usart_print(uint32_t usart, int16_t value)
 {
 	int8_t i;
 	int8_t nr_digits = 0;
@@ -102,24 +105,41 @@ static void my_usart_print_int(uint32_t usart, int16_t value)
 	for (i = nr_digits-1; i >= 0; i--) {
 		usart_send_blocking(usart, buffer[i]);
 	}
+}
 
-	usart_send_blocking(usart, '\r');
-	usart_send_blocking(usart, '\n');
+static uint16_t read(uint8_t channel);
+
+static uint16_t read(uint8_t channel)
+{
+	uint8_t channel_array[] = {channel};
+	adc_set_regular_sequence(ADC1, 1, channel_array);
+	adc_start_conversion_regular(ADC1);
+	while (!(adc_eoc(ADC1)));
+	return adc_read_regular(ADC1);
 }
 
 int main(void)
 {
-	uint16_t temp;
-
 	adc_setup();
 	usart_setup();
+	led_setup();
+
+	uint16_t btn, uv, therm;
 
 	while (1) {
-		adc_start_conversion_regular(ADC1);
-		while (!(adc_eoc(ADC1)));
+		gpio_toggle(GPIOB, GPIO0);
 
-		temp = adc_read_regular(ADC1);
-		my_usart_print_int(USART1, temp);
+		btn = read(0);
+		uv = read(1);
+		therm = read(16);
+
+		my_usart_print(USART1, btn);
+		usart_send_blocking(USART1, ';');
+		my_usart_print(USART1, uv);
+		usart_send_blocking(USART1, ';');
+		my_usart_print(USART1, therm);
+		usart_send_blocking(USART1, '\r');
+		usart_send_blocking(USART1, '\n');
 
 		int i;
 		for (i = 0; i < 800000; i++) {   /* Wait a bit. */
